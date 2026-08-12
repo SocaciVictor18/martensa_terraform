@@ -1,0 +1,75 @@
+# Copy to terraform.tfvars and fill in. The real file is gitignored: it names the account,
+# the domain and the merchant.
+
+region      = "eu-central-1"
+environment = "dev"
+
+# --- Ingress -----------------------------------------------------------------
+
+# Public hostname for the API. No DNS record is created for it here - see variables.tf.
+api_domain = "api.martensa.example"
+
+# ACM certificate covering api_domain, issued IN THE SAME REGION as everything else.
+# This is NOT the same certificate as the storefront's.
+api_certificate_arn = "arn:aws:acm:eu-central-1:000000000000:certificate/00000000-0000-0000-0000-000000000000"
+
+# --- Storefront --------------------------------------------------------------
+
+# Globally unique across every AWS account. Include the account id or another suffix.
+storefront_bucket_name = "martensa-dev-storefront-000000000000"
+
+# Leave empty to use the generated *.cloudfront.net name. If set, storefront_certificate_arn
+# must cover every entry and must be issued in us-east-1 - CloudFront reads certificates from
+# nowhere else, whatever region the rest of this lives in.
+storefront_domains         = []
+storefront_certificate_arn = null
+
+# --- Images ------------------------------------------------------------------
+
+# Immutable tags. The ECR repositories are configured IMMUTABLE so ':latest' cannot be
+# re-pushed to mean something new - use a commit SHA. Terraform sets only the first revision;
+# CI registers every one after that.
+images = {
+  users     = "000000000000.dkr.ecr.eu-central-1.amazonaws.com/martensa-dev/users:0000000"
+  catalog   = "000000000000.dkr.ecr.eu-central-1.amazonaws.com/martensa-dev/catalog:0000000"
+  inventory = "000000000000.dkr.ecr.eu-central-1.amazonaws.com/martensa-dev/inventory:0000000"
+  cart      = "000000000000.dkr.ecr.eu-central-1.amazonaws.com/martensa-dev/cart:0000000"
+  orders    = "000000000000.dkr.ecr.eu-central-1.amazonaws.com/martensa-dev/orders:0000000"
+  payments  = "000000000000.dkr.ecr.eu-central-1.amazonaws.com/martensa-dev/payments:0000000"
+  gateway   = "000000000000.dkr.ecr.eu-central-1.amazonaws.com/martensa-dev/gateway:0000000"
+}
+
+# Every service to zero parks the environment without destroying anything. The database, the
+# cache and the broker's filesystem stay; only the compute stops being billed.
+desired_counts = {
+  users     = 1
+  catalog   = 1
+  inventory = 1
+  cart      = 1
+  orders    = 1
+  payments  = 1
+  gateway   = 1
+}
+
+# --- Application -------------------------------------------------------------
+
+# Public by design: it is compiled into the storefront's JavaScript. Blank disables
+# POST /api/auth/google, which then answers 503 rather than pretending to verify anything.
+google_client_id = ""
+
+# UUID of an already-registered account to promote to administrator at start-up. By id, not by
+# email - an email can be claimed by whoever registers it first, which would make bootstrapping
+# a race for administrator. Blank is the correct steady state once the first admin exists.
+bootstrap_admin_user_id = ""
+
+# --- Guard rails -------------------------------------------------------------
+
+# All three are the production defaults. Set them false only for an environment you intend to
+# tear down and rebuild.
+db_deletion_protection  = true
+db_skip_final_snapshot  = false
+alb_deletion_protection = true
+
+# ~70% off the compute bill. Every application service tolerates a reclaim; the broker never
+# runs on Spot regardless of this setting.
+use_fargate_spot = true

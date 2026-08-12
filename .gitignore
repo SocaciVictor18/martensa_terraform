@@ -1,0 +1,27 @@
+# Provider binaries and lock metadata. The lock *file* is committed - see below.
+.terraform/
+.terraform.lock.hcl.bak
+
+# State. This should never appear here at all: the backend is S3. If a file matching
+# this shows up locally, something ran without `terraform init`, and that file contains
+# every generated password in plain text.
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Real variable values. `terraform.tfvars.example` is committed; the real one is not,
+# because it names the account, the domain and the merchant id.
+*.tfvars
+!*.tfvars.example
+
+# Saved plans. A plan file contains the full resource diff, including secret values
+# that are being set for the first time.
+tfplan
+*.tfplan
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

@@ -1,0 +1,23 @@
+# Copy to backend.hcl and fill in, then:
+#
+#   terraform init -backend-config=backend.hcl
+#
+# These cannot live in versions.tf. The backend block is read before Terraform evaluates
+# anything, so `bucket = var.state_bucket` fails with "Variables not allowed" - which is the
+# usual first stumble with remote state, and it looks like a syntax error rather than a
+# lifecycle one.
+#
+# Create the bucket and lock table first with the `bootstrap/` configuration in this repo.
+
+bucket = "martensa-tfstate-000000000000"
+key    = "dev/terraform.tfstate"
+region = "eu-central-1"
+
+# Server-side encryption. The state holds the per-service database passwords in plain text -
+# see modules/database/main.tf for why that trade was made - so this is not optional.
+encrypt = true
+
+# S3-native locking, which replaced the DynamoDB table in Terraform 1.10. Without a lock, two
+# applies running at once interleave writes and the state ends up describing neither - and the
+# only way back is picking through bucket versions by hand.
+use_lockfile = true
