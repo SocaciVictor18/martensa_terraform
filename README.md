@@ -10,6 +10,11 @@ Application design lives in `docs/martensa-v2-architecture-blueprint.md` **in
 martensa-platform-parent** — one copy for the whole platform. Why each choice here was made, and
 what breaks without it, is in [`docs/infrastructure.md`](docs/infrastructure.md).
 
+**New to these AWS services?** [`docs/aws-services-guide.md`](docs/aws-services-guide.md) answers
+the prior question — what each service *is*, why it is in the design, what was rejected instead,
+what it costs, and what to read next. `infrastructure.md` is the decision log; that one is the
+reading guide.
+
 ---
 
 ## Layout

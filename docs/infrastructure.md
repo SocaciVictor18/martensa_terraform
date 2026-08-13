@@ -7,6 +7,12 @@ martensa-platform-parent** — one copy for the whole platform, deliberately not
 Toolchain and build gates live in that repo's `docs/infrastructure.md`. This file covers only
 what is true of the **AWS infrastructure**.
 
+**This file assumes you know what the services are.** If a term below is unfamiliar,
+[`aws-services-guide.md`](aws-services-guide.md) is the companion: what each AWS service is, why
+it is in this design, what was rejected instead, and what to read. The two are deliberately
+split — this one records *decisions and their consequences*, that one teaches *the material*.
+A decision recorded twice drifts.
+
 **Nothing here has been applied.** The code is `fmt`-clean, `validate`-clean and `tflint`-clean
 across nine modules and two root configurations. That is a real check — it catches type errors,
 unknown arguments, unused declarations, missing provider constraints — and it is not a plan. A
