@@ -27,7 +27,7 @@ and validated", not "observed in production".
 | | |
 |---|---|
 | Region | `eu-central-1` (Frankfurt — nearest to Vrancea with full service coverage) |
-| Modules | 9 |
+| Modules | 10 |
 | Root configurations | 2 (`bootstrap`, `environments/dev`) |
 | Terraform | ≥ 1.5, AWS provider `~> 5.0` |
 | Services | 7 + gateway + storefront |
@@ -355,6 +355,79 @@ alternative would let a missing variable here dead-letter an event on Inventory'
 
 ---
 
+## 6c. The GitHub Actions role, and the condition that is the whole of it
+
+Written before there is a deploy workflow, deliberately. **The workflow cannot be tested without an
+applied environment; the trust policy can be reviewed**, and the review is the part that matters
+here, because the failure is silent.
+
+### Why not an access key
+
+The alternative is a key pair in GitHub's secrets: a long-lived credential with permission to
+replace what runs in production, held by a system this repository does not control, with no expiry
+and no record of what used it. OIDC replaces it with a token minted per workflow run, tied to a
+repository and a branch, valid for that run.
+
+### The `sub` condition
+
+The OIDC provider trusts **GitHub**, not this account's repositories. Without a condition on `sub`,
+**any repository on GitHub — anyone's — can mint a token this role accepts** and deploy here.
+
+That is the classic misconfiguration of this pattern, and what makes it dangerous is that it is
+invisible: the role works perfectly for the intended workflow, so nothing fails, nothing is logged
+that looks wrong, and the only way to find it is to read the policy. The owner and the repository
+names are always literals; the pattern exists only for the branch.
+
+`aud` is the second half. Without it, a token minted for a different audience — another AWS
+account, or another service that also trusts GitHub's issuer — would be accepted.
+
+**The branch is pinned** because a workflow file is part of the branch it runs on. Leaving it open
+would mean any pushed branch could run an edited workflow holding this role's permissions.
+
+### `iam:PassRole` is the statement that decides whether the role is safe
+
+A task definition names the roles its containers run with. **`RegisterTaskDefinition` plus
+unrestricted `PassRole` is permission to run a container as any role in the account** — including
+an administrator — which turns a compromised workflow into a full account takeover through a path
+that looks exactly like an ordinary deployment.
+
+It is scoped to the three roles this platform's tasks actually use: the shared execution role, the
+shared task role, and the notification service's own (§6b). Adding a service with its own role
+means adding it here, and forgetting produces an explicit `AccessDenied` naming the role — which is
+the right way round.
+
+### Everything else is scoped too
+
+- `ecr:GetAuthorizationToken` has to be on `*` — it is an account-level call taking no resource —
+  which is *why* every other ECR action is scoped to this platform's repositories. Otherwise
+  permission to log in to ECR would be permission to overwrite any image in the account.
+- `ecs:UpdateService` and the read calls are conditioned on `ecs:cluster`, so a compromised
+  workflow cannot redeploy something else in the account.
+- The storefront statements are scoped to the one bucket and the one distribution. **The
+  invalidation is not optional**: without it a deploy succeeds and customers keep the previous
+  bundle until the TTL expires — a deployment that reports success and changes nothing anyone can
+  see, which is the hardest kind to diagnose because everything says it worked.
+
+`thumbprint_list` is deliberately unset. AWS has validated GitHub's OIDC certificates against its
+own trust store since mid-2023, and a hand-maintained thumbprint used to break every deployment on
+the day GitHub rotated a certificate — with an error naming a TLS failure rather than a
+configuration file.
+
+### What the gates do not cover here
+
+That the trust policy admits the repositories it should, and refuses the ones it should not, is
+**not** something any of the three gates can check. `validate` says the document is well-formed;
+`tflint` says the arguments exist. Whether `repo:owner/name:ref:refs/heads/main` matches what
+GitHub actually puts in the token is settled by the first workflow run that assumes the role. Its
+failure mode is an `AccessDenied` — the safe direction — but it is still an assertion this
+repository cannot make on its own.
+
+The provider is **one per account**. A second environment must import it; creating another raises
+`EntityAlreadyExists`, which is the right error arriving at the wrong time — during an apply rather
+than a plan.
+
+---
+
 ## 7. ECS settings that are load-bearing
 
 **The deployment circuit breaker.** Without it, a deployment whose tasks cannot start does not
@@ -487,9 +560,11 @@ Named rather than left to be discovered.
   omissions with reasons in §6b, and both are also things that must happen before a single message
   reaches a customer. In the sandbox, sends succeed for verified test addresses and fail for real
   ones - which looks like a bug in the contact lookup rather than like an account setting.
-- **No CI/CD.** Roadmap step 11. The pieces are here — ECR repositories, an ECS cluster name, a
-  CloudFront distribution id for the invalidation — but no workflow uses them. Deploying by hand
-  works; the OIDC role a GitHub Actions workflow would assume does not exist yet.
+- **No deploy workflow.** Roadmap step 11. The pieces are here — ECR repositories, an ECS cluster
+  name, a CloudFront distribution id for the invalidation, and now the OIDC role (§6c) — but no
+  workflow uses them. Writing one is cheap; **verifying it is not possible without an applied
+  environment**, and an untested deploy workflow is worse than none because it looks finished. It
+  gets written when the infrastructure is applied, not before.
 - **No DNS.** `api_domain` is a variable and nothing creates a record for it. The hosted zone may
   live in another account, and a record written into a zone Terraform does not own fails in a way
   that is tedious to unpick. Until the record exists, the ALB answers on its own name but

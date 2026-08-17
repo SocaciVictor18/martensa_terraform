@@ -191,3 +191,52 @@ variable "notification_admin_alerts" {
   type        = string
   default     = ""
 }
+
+# ---------------------------------------------------------------------------
+# CI/CD
+# ---------------------------------------------------------------------------
+
+variable "github_owner" {
+  description = <<-EOT
+    The GitHub user or organisation owning the repositories allowed to deploy.
+
+    Always a literal in the trust policy. It and `deploy_repositories` are what stop any repository
+    on GitHub from minting a token the deploy role accepts - the failure mode that is invisible,
+    because the intended workflow keeps working either way.
+  EOT
+  type        = string
+}
+
+variable "deploy_repositories" {
+  description = <<-EOT
+    Repository names, without the owner, allowed to assume the deploy role.
+
+    Defaults to the eight that produce a deployable artefact: seven services, the gateway and the
+    storefront. martensa-platform-parent and martensa_terraform are deliberately absent - neither
+    ships an image, and a repository that cannot deploy should not be able to.
+  EOT
+  type        = list(string)
+
+  default = [
+    "martensa-users",
+    "martensa-catalog",
+    "martensa-inventory",
+    "martensa-cart",
+    "martensa-orders",
+    "martensa-payments",
+    "martensa-notification",
+    "martensa-gateway",
+    "martensa-frontend",
+  ]
+}
+
+variable "deploy_branch" {
+  description = <<-EOT
+    The single branch a deploy may run from.
+
+    A workflow file is part of the branch it runs on, so leaving this open would mean any pushed
+    branch could run an edited workflow holding the deploy role's permissions.
+  EOT
+  type        = string
+  default     = "main"
+}
