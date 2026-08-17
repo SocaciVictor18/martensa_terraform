@@ -29,11 +29,12 @@ variable "service_databases" {
   type        = map(string)
 
   default = {
-    users     = "users_svc"
-    catalog   = "catalog_svc"
-    inventory = "inventory_svc"
-    orders    = "orders_svc"
-    payments  = "payments_svc"
+    users        = "users_svc"
+    catalog      = "catalog_svc"
+    inventory    = "inventory_svc"
+    orders       = "orders_svc"
+    payments     = "payments_svc"
+    notification = "notification_svc"
   }
 
   validation {

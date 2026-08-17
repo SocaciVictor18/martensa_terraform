@@ -14,12 +14,13 @@ locals {
   # They are the same locally and on AWS on purpose: a port that differs between environments is
   # one more thing to be wrong in a runbook at three in the morning.
   service_ports = {
-    users     = 9001
-    catalog   = 9002
-    inventory = 9003
-    cart      = 9004
-    orders    = 9005
-    payments  = 9006
+    users        = 9001
+    catalog      = 9002
+    inventory    = 9003
+    cart         = 9004
+    orders       = 9005
+    payments     = 9006
+    notification = 9007
   }
 
   gateway_port = 9000
@@ -129,6 +130,17 @@ locals {
   # The public key is not a secret - it exists to be distributed - but it is stored in Secrets
   # Manager anyway so that regenerating the keypair is one write instead of seven redeployments.
   jwt_public_key_secret = aws_secretsmanager_secret.application["jwt/public-key"].arn
+
+  # One shared secret, three services, three different environment variable names. Users and
+  # Catalog read it as the token they *expect* on /api/internal/**; the notification service
+  # reads it twice as the token it *presents*. One value rather than a pair per direction,
+  # because a rotation that has to land in three task definitions at the same instant is hard
+  # enough without also being three different values - and the failure it causes is 401s that
+  # read as the callee being broken.
+  #
+  # **REMOVE WHEN the platform has real service identity** (blueprint 6). A shared bearer secret
+  # with no expiry and no way to tell one caller from another is the placeholder, not the plan.
+  internal_api_token_secret = aws_secretsmanager_secret.internal_api_token.arn
 }
 
 module "users" {
@@ -166,6 +178,11 @@ module "users" {
     DB_PASSWORD     = "${module.database.service_secret_arns["users"]}:password::"
     JWT_PRIVATE_KEY = aws_secretsmanager_secret.application["jwt/private-key"].arn
     JWT_PUBLIC_KEY  = local.jwt_public_key_secret
+    # What Users requires on /api/internal/contacts. Unset, that endpoint fails closed and the
+    # notification service gets 401 on every lookup - so no customer receives any email at all,
+    # while Users itself looks perfectly healthy. Users logs a warning naming this property at
+    # start-up precisely because the symptom points at the wrong service.
+    INTERNAL_API_TOKEN = local.internal_api_token_secret
   }
 }
 
@@ -194,6 +211,10 @@ module "catalog" {
     DB_USERNAME    = "${module.database.service_secret_arns["catalog"]}:username::"
     DB_PASSWORD    = "${module.database.service_secret_arns["catalog"]}:password::"
     JWT_PUBLIC_KEY = local.jwt_public_key_secret
+    # What Catalog requires on /api/internal/products. Unset, low-stock alerts still reach
+    # operations but name products by a raw id - which is the failure mode this whole platform
+    # prefers, and is also the one nobody reports as a bug.
+    INTERNAL_API_TOKEN = local.internal_api_token_secret
   }
 }
 

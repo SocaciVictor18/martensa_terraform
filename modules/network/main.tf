@@ -146,8 +146,23 @@ resource "aws_vpc_endpoint" "s3" {
 #                        you is the log driver itself
 #   secretsmanager     - task definitions resolve secret ARNs at start-up. Missing this stops
 #                        the task before the container ever runs, with a pull-secret error
+#   email              - the SESv2 API, which the notification service uses as its transport in
+#                        the `aws` profile. This is the first entry here that exists for one
+#                        service rather than for all of them, and the first AWS API any task
+#                        calls at all
+#
+# **`email` is the API endpoint, not `email-smtp`.** They are different endpoints for different
+# protocols, and picking the wrong one produces a service that starts cleanly and cannot send:
+# the SDK signs a request to the SESv2 API, which the SMTP endpoint does not serve. AWS's own
+# console distinguishes them by search term - filter on *email* for the API, *smtp* for SMTP
+# (docs: "Setting up VPC endpoints with Amazon SES"). This platform sends through the API
+# because the SDK signs with the task role, where SMTP would need IAM-derived credentials - a
+# secret this platform would then have to create, store and rotate.
+#
+# The Availability Zone exclusions in that same document (`use1-az2`, `cac1-az3`, and the rest)
+# apply to the **SMTP** endpoint only, and none of them are in eu-central-1 regardless.
 resource "aws_vpc_endpoint" "interface" {
-  for_each = toset(["ecr.api", "ecr.dkr", "logs", "secretsmanager"])
+  for_each = toset(["ecr.api", "ecr.dkr", "logs", "secretsmanager", "email"])
 
   vpc_id              = aws_vpc.this.id
   service_name        = "com.amazonaws.${var.region}.${each.key}"

@@ -131,3 +131,63 @@ variable "use_fargate_spot" {
   type        = bool
   default     = true
 }
+
+# ---------------------------------------------------------------------------
+# The notification service
+# ---------------------------------------------------------------------------
+
+variable "notification_mail_from" {
+  description = <<-EOT
+    The address every message is sent from, and the SES identity this platform may send as.
+
+    **Its domain has to be verified in SES out of band, and Terraform deliberately does not do
+    it.** Verification is a DNS record on a zone this configuration does not manage - the
+    storefront's domain is a variable here, not a Route 53 zone - so an `aws_ses_domain_identity`
+    resource would create an identity stuck in `Pending` for ever and report success. Worse, it
+    would make `terraform destroy` remove a verification that took a DNS propagation to earn.
+
+    The domain half of this value is also what the task role's SES policy is scoped to, so
+    changing it changes what the service is permitted to send as. The two cannot drift, which is
+    the reason the policy derives the domain from here rather than taking its own variable.
+
+    Until the domain is verified **and** the account is out of the SES sandbox, sends fail with
+    `MessageRejected` - and in the sandbox they fail for every recipient that is not itself
+    verified, which looks exactly like a bug in the recipient lookup.
+  EOT
+  type        = string
+
+  validation {
+    condition     = can(regex("^[^@[:space:]]+@[^@[:space:].]+[.][^@[:space:]]+$", var.notification_mail_from))
+    error_message = "notification_mail_from must be a single email address - its domain is used to scope the SES policy."
+  }
+}
+
+variable "notification_mail_from_name" {
+  description = "The display name beside the from-address. What a recipient's inbox shows before they open anything."
+  type        = string
+  default     = "Martensa"
+}
+
+variable "notification_mail_reply_to" {
+  description = <<-EOT
+    Where a customer's reply goes.
+
+    Different from the from-address on purpose: that one is a no-reply sender the platform owns,
+    and this is a mailbox somebody reads. A message whose Reply-To lands in the same unattended
+    no-reply inbox is how a customer's question about their order disappears.
+  EOT
+  type        = string
+}
+
+variable "notification_admin_alerts" {
+  description = <<-EOT
+    Where the low-stock alert goes. A human's inbox, or blank.
+
+    Blank is a supported state rather than a misconfiguration: the alert is queued, found to have
+    nowhere to go, and abandoned with a warning naming this property. That is the right answer to
+    "nobody asked for these" - the alternative would let a missing property here dead-letter an
+    event on Inventory's topic.
+  EOT
+  type        = string
+  default     = ""
+}
