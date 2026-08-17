@@ -30,7 +30,9 @@ and validated", not "observed in production".
 | Modules | 9 |
 | Root configurations | 2 (`bootstrap`, `environments/dev`) |
 | Terraform | ≥ 1.5, AWS provider `~> 5.0` |
-| Estimated cost | ~$75–90/month running, ~$40 parked |
+| Services | 7 + gateway + storefront |
+| Interface endpoints | 5 — `ecr.api`, `ecr.dkr`, `logs`, `secretsmanager`, `email` (§6b) |
+| Estimated cost | ~$85–100/month running, ~$45 parked — the seventh service and a fifth interface endpoint |
 
 ---
 
@@ -178,6 +180,7 @@ enforces.
 |---|---|---|
 | RDS master | RDS generates and rotates it (`manage_master_user_password`) | **No** |
 | Per-service DB | `random_password`, stored as a JSON secret | **Yes** — accepted trade |
+| Internal API token | `random_password`, one secret read by three services | **Yes** — and §6b argues why it is *not* in the tier below, where it looks like it belongs |
 | JWT key, EuPlătesc key | Written once by hand, `ignore_changes` | **No** |
 
 Terraform records every attribute of every resource it manages, and `random_password.result` is
@@ -217,9 +220,14 @@ zero, a secret deleted by mistake is unrecoverable.
   fetch secrets, create the log stream. The container never holds these credentials.
 - **Task role** — assumed by the *application*. This is what an exploited service can use.
 
-The task role here is **deliberately empty**. None of the seven services calls an AWS API — every
-secret arrives as an environment variable injected before start-up. A remote-code-execution bug
-therefore yields an AWS identity that can do nothing.
+The *shared* task role is **deliberately empty**, and six of the seven services still use it: every
+secret arrives as an environment variable injected before start-up, so a remote-code-execution bug
+in one of them yields an AWS identity that can do nothing.
+
+> **The notification service is the exception, and it has its own role rather than widening this
+> one.** It sends through the SESv2 API — the first AWS call any task on this platform makes. §6b
+> has the reasoning; the short version is that granting SES here would also grant it to Cart.
+
 
 Merging the two, which is the usual shortcut, would hand that same bug permission to read every
 secret on the platform. The role exists rather than being omitted so that ECS Exec can attach to
@@ -231,6 +239,119 @@ too.
 > That inline policy is added separately, scoped to this environment's secret prefix rather than
 > `*`. The RDS-managed master credential gets an AWS-generated name outside that prefix, so it is
 > named explicitly instead of widening the wildcard.
+
+---
+
+## 6b. The notification service — the first task that calls an AWS API
+
+Adding the seventh service was mostly mechanical: a port, a database, an ECR repository, a task
+definition. Three things were not.
+
+### The task role stopped being empty, and got split instead
+
+§6 said the task role is *deliberately empty*, that no service calls an AWS API, and that it exists
+so **the next service that genuinely needs a permission has an obvious place to put it**. This is
+that service — it sends through the SESv2 API — and the place turned out to be wrong for the same
+reason the execution role was wrong.
+
+Attaching `ses:SendEmail` to the shared task role would grant it to Cart, to Payments and to the
+gateway as well. A permission held by six tasks that cannot use it is a permission nobody will
+think to remove, and it converts an exploited Cart into something that can send mail signed with
+this platform's domain.
+
+So: **a role per service, starting with the one that needs something.** The other six keep sharing
+the empty role, because they still need nothing. `environments/dev/notification.tf` holds the new
+one — in its own file rather than among the service blocks in `main.tf`, because an IAM role there
+would be the least likely thing in this configuration to be noticed.
+
+***REMOVE WHEN*** a second service needs an AWS permission. At two this belongs in
+`modules/service` as an optional policy document, not copied into a second file here.
+
+**The policy is scoped to one identity, not to `*`.** SES identities are what a recipient's mail
+client shows as the sender, so an unconstrained `ses:SendEmail` is permission to send mail
+appearing to come from *anything the account has verified*. The resource is the identity ARN built
+from `notification_mail_from`'s domain, so the worst a compromised task can do is send from the
+address it was already sending from. It is also not `ses:*` — that includes `DeleteIdentity`, which
+would let a compromised task destroy the domain verification and take the platform's ability to
+send email with it, in a way that looks like SES being broken and takes a DNS round trip to undo.
+
+### `com.amazonaws.<region>.email`, and why the obvious one is wrong
+
+There is no NAT Gateway (§3), so **every** AWS API a task calls needs an interface endpoint. SES is
+the fifth entry in that list and the first that exists for one service rather than for all of them.
+
+The trap is that SES publishes **two** endpoints and they are not interchangeable:
+
+| Service name | Serves |
+|---|---|
+| `com.amazonaws.<region>.email` | the SES **API** — what the SDK calls |
+| `com.amazonaws.<region>.email-smtp` | the SMTP interface |
+
+Picking `email-smtp` produces a service that starts cleanly and cannot send: the SDK signs a
+request to the SESv2 API, which the SMTP endpoint does not serve. AWS's own console distinguishes
+them only by search term — *filter on `email` for the API, `smtp` for SMTP*
+([Setting up VPC endpoints with Amazon SES](https://docs.aws.amazon.com/ses/latest/dg/send-email-set-up-vpc-endpoints.html)).
+
+The Availability Zone exclusions in that same document (`use1-az2`, `cac1-az3` and the rest) apply
+to the **SMTP** endpoint only, and none of them are in `eu-central-1` regardless.
+
+This platform sends through the API rather than SMTP because the SDK signs with the task role,
+where SMTP needs IAM-derived credentials — **a secret this platform would then have to create,
+store and rotate**, for the same capability.
+
+### The secret that would have worked while being wrong
+
+`internal/api-token` opens `/api/internal/**` on Users and Catalog. Users' half is the contact
+directory: every customer's name and email address, readable over plain HTTP by anything inside the
+VPC holding that string.
+
+By §5's tiers it looks like a third-tier secret — hand-filled, `ignore_changes`, never in state.
+**It is generated instead, and the reason is the failure mode of the alternative.**
+
+A hand-filled secret starts life as the literal `REPLACE-ME`. For the JWT key that is loud: the
+platform rejects every token until somebody fixes it, within minutes of the first request. This one
+would be **silent**. All three services read the same value, so `REPLACE-ME` on every side *matches*
+— Users accepts it, Catalog accepts it, the notification service presents it, and the platform works
+perfectly with a credential that is written in a committed file, in git history, and identical in
+every environment anyone copied it into. Nothing fails, so nobody looks.
+
+**A secret whose insecure state is also its working state does not get replaced.** Generating it
+means the working state is the secure one, which is the only arrangement that survives somebody
+being busy. The trade is the one §5 already accepts for the per-service database passwords: it
+lands in state, and the state bucket is encrypted, versioned and refuses plain HTTP for exactly
+this class of value.
+
+It is also the one secret here **without** `ignore_changes`, deliberately. There, the rule protects
+a real value from being overwritten by a placeholder; here Terraform owns the value, so ignoring
+changes would let an out-of-band rotation silently disagree with state and leave the next apply
+unable to put it back.
+
+So §5's table gains a row:
+
+| Tier | Where the value comes from | In Terraform state? |
+|---|---|---|
+| Internal API token | `random_password`, one secret read by three services | **Yes** — see above |
+
+***REMOVE WHEN*** the platform has real service identity (blueprint §6). A bearer credential with
+no expiry, no rotation story and no way to tell one caller from another is the placeholder, not the
+plan.
+
+### What this configuration deliberately does not do
+
+**It does not verify the SES domain.** `aws_ses_domain_identity` would create an identity whose
+verification is a DNS record on a zone this configuration does not manage — the storefront's domain
+is a variable here, not a Route 53 zone — so it would sit in `Pending` for ever while reporting
+success. Worse, `terraform destroy` would remove a verification that took a DNS propagation to earn.
+The variable's description says so, because the symptom otherwise is `MessageRejected` on every
+send with nothing in this repo suggesting why.
+
+**Nor does it leave the SES sandbox.** In the sandbox every *recipient* must also be verified, so
+sends fail for real customers while working perfectly for whoever is testing — which looks exactly
+like a bug in the contact lookup. Leaving it is a support request, not a resource.
+
+`notification_admin_alerts` defaults to blank and that is a supported state: the low-stock alert is
+queued, found to have nowhere to go, and abandoned with a warning naming the property. The
+alternative would let a missing variable here dead-letter an event on Inventory's topic.
 
 ---
 
@@ -352,6 +473,20 @@ Named rather than left to be discovered.
   learned to hold a loyalty voucher - has never been observed working. It is the archetype of the
   variable that gets forgotten: the service starts fine without it and every checkout *without* a
   voucher succeeds, so the first failure would be a customer using one on a deployed environment.
+- **The SES path has never sent a message from AWS.** `terraform validate` says the configuration
+  is well-formed; it cannot say that `com.amazonaws.eu-central-1.email` exists in this region, that
+  the identity ARN in the task role's policy matches what SES actually calls the identity, or that
+  the SDK reaches the endpoint through private DNS. Those are three separate things that can each
+  be wrong on their own, and every one of them fails the same way from the outside: the queue stops
+  draining, with the reason in the task's logs rather than anywhere a health check looks.
+
+  The endpoint's *service name* is not a guess - AWS's documentation distinguishes `email` (API)
+  from `email-smtp` (SMTP) and §6b cites it - but "documented" and "available in eu-central-1 for
+  this account" are different claims, and only an apply settles the second.
+- **The SES domain is not verified and the account is not out of the sandbox.** Both are deliberate
+  omissions with reasons in §6b, and both are also things that must happen before a single message
+  reaches a customer. In the sandbox, sends succeed for verified test addresses and fail for real
+  ones - which looks like a bug in the contact lookup rather than like an account setting.
 - **No CI/CD.** Roadmap step 11. The pieces are here — ECR repositories, an ECS cluster name, a
   CloudFront distribution id for the invalidation — but no workflow uses them. Deploying by hand
   works; the OIDC role a GitHub Actions workflow would assume does not exist yet.

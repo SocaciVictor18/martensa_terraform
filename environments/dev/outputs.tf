@@ -89,5 +89,21 @@ output "internal_base_urls" {
     orders    = module.orders.base_url
     payments  = module.payments.base_url
     gateway   = module.gateway.base_url
+    # Listed for completeness, and nothing calls it. The notification service has no inbound
+    # traffic from any other service - it is driven entirely by Kafka - and the gateway does not
+    # route to it, which is the first lock on its admin endpoints.
+    notification = module.notification.base_url
   }
+}
+
+output "internal_api_token_secret_arn" {
+  description = <<-EOT
+    The generated shared secret for `/api/internal/**`.
+
+    Unlike `application_secret_arns` above, this one already holds a real value - Terraform
+    generated it, for the reason set out in secrets.tf. It is an output so that a 401 between the
+    notification service and Users can be diagnosed by reading the value the three task
+    definitions were actually given, which is the question that failure always turns into.
+  EOT
+  value       = aws_secretsmanager_secret.internal_api_token.arn
 }
