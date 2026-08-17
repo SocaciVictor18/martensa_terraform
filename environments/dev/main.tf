@@ -282,6 +282,11 @@ module "orders" {
     CART_BASE_URL      = module.cart.base_url
     CATALOG_BASE_URL   = module.catalog.base_url
     INVENTORY_BASE_URL = module.inventory.base_url
+    # Orders calls Users to hold a loyalty voucher during checkout. Only reached when the
+    # customer attached a code, which is what makes this the kind of variable that gets
+    # forgotten: the service starts fine without it and every checkout without a voucher works,
+    # so the first failure is a customer using a voucher on a deployed environment.
+    USERS_BASE_URL = module.users.base_url
   })
 
   secrets = {

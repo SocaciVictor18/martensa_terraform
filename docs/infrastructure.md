@@ -348,6 +348,10 @@ ceremony than it is worth here.
 Named rather than left to be discovered.
 
 - **Never applied.** See the note at the top.
+- **Nothing here has been applied**, so `USERS_BASE_URL` on the Orders task - added when Orders
+  learned to hold a loyalty voucher - has never been observed working. It is the archetype of the
+  variable that gets forgotten: the service starts fine without it and every checkout *without* a
+  voucher succeeds, so the first failure would be a customer using one on a deployed environment.
 - **No CI/CD.** Roadmap step 11. The pieces are here — ECR repositories, an ECS cluster name, a
   CloudFront distribution id for the invalidation — but no workflow uses them. Deploying by hand
   works; the OIDC role a GitHub Actions workflow would assume does not exist yet.
