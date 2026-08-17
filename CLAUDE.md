@@ -3,28 +3,39 @@
 > **This file is canonical.** The other repos (`martensa-users`, `martensa-catalog`, …,
 > `martensa-frontend`, `martensa_terraform`) hold byte-identical copies, because an agent loads
 > the `CLAUDE.md` of whichever repo it is working in. Edit **this** copy and propagate outward; a
-> change made in another repo will be overwritten and lost. Ten copies today — check with
+> change made in another repo will be overwritten and lost. **Eleven copies** today — check with
 > `md5sum */CLAUDE.md` before assuming they are in step.
 
 Full architecture: `docs/martensa-v2-architecture-blueprint.md` in this repo — **one copy for
 the whole platform**, never duplicated into a service repo.
 
-Summary: 6 Spring Boot microservices (Users, Catalog, Inventory, Cart, Orders, Payments) + API
-Gateway. Polyrepo — one git repo per service. Database-per-service (own Postgres each, Cart uses
+Summary: 7 Spring Boot microservices (Users, Catalog, Inventory, Cart, Orders, Payments,
+Notification) + API Gateway. Polyrepo — one git repo per service. Database-per-service (own Postgres each, Cart uses
 Redis), UUID primary keys, REST for synchronous calls, **Kafka** for asynchronous events, deploy
 target AWS ECS Fargate. All services inherit the `martensa-platform-parent` POM.
 
-**Built so far:** all six services, the **API Gateway**, and the **storefront** — Users (auth,
-RS256 JWT issuer, sign in with Google, loyalty points ledger), Catalog (products, categories, promotions, first Kafka
-producer), Inventory (stock, reservations, first Kafka consumer), Cart (Redis, no relational
-database), Orders (the first orchestrator and the generic outbox), Payments (EuPlătesc hosted
-page + signed IPN, the first inbound webhook), Gateway (Spring Cloud Gateway, reactive, owns no
-data at all), Frontend (`martensa-frontend` — React 19 + Vite + TypeScript + Tailwind, talks
-only to the gateway, owns no data either), and the **AWS infrastructure** (`martensa_terraform` —
-nine modules, written and validated, **never applied**).
+**Built so far:** all seven services, the **API Gateway**, and the **storefront** — Users (auth,
+RS256 JWT issuer, sign in with Google, loyalty points ledger, account-security outbox), Catalog
+(products, categories, promotions, first Kafka producer), Inventory (stock, reservations, first
+Kafka consumer, and since V4 a producer too), Cart (Redis, no relational database), Orders (the
+first orchestrator and the generic outbox), Payments (EuPlătesc hosted page + signed IPN, the
+first inbound webhook), Notification (`martensa-notification` — outbound email, seven topics
+consumed and none produced, no customer-facing HTTP at all), Gateway (Spring Cloud Gateway,
+reactive, owns no data at all), Frontend (`martensa-frontend` — React 19 + Vite + TypeScript +
+Tailwind, talks only to the gateway, owns no data either), and the **AWS infrastructure**
+(`martensa_terraform` — nine modules, written and validated, **never applied**).
 **Next:** roadmap step 11, CI/CD — the deploy stage, and a gate for the frontend.
-Every topic on the platform has a consumer except `PromotionStarted` (waiting on the deferred
-Notification service) and `PaymentFailed` (deliberately unconsumed — blueprint §4).
+
+**Every topic on the platform now has a consumer.** The two that did not — `PromotionStarted` and
+`PaymentFailed` — are both read by the notification service. The second was deliberately
+unconsumed (blueprint §4) and the reasoning was right at the time: a declined card changes nothing
+about the order, so a consumer that only logged would be machinery pretending to be a decision.
+What changed is that there is now something to *do* with it. The premise fell; the rule did not.
+
+**Three services now produce as well as consume**, which is the shape to expect from here:
+Catalog (`promotion-started`), Inventory (`stock-ran-low`), Users (`account-security`). A service
+that publishes needs an outbox — a marker column for one event type, the generic table for
+several — and the reasoning for both is in the Kafka section below.
 
 **The frontend is a different stack and a different rule set.** `martensa-frontend` is Node, not
 Maven: `npm run verify` (typecheck + Vitest + build) is its gate, there is no Checkstyle or
