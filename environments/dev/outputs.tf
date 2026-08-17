@@ -107,3 +107,14 @@ output "internal_api_token_secret_arn" {
   EOT
   value       = aws_secretsmanager_secret.internal_api_token.arn
 }
+
+output "github_deploy_role_arn" {
+  description = <<-EOT
+    What a deploy workflow puts in `role-to-assume`, alongside `permissions: id-token: write`.
+
+    Not a secret. It is an ARN, useless without a token minted by one of the repositories named in
+    the trust policy - and keeping it in a GitHub secret would only make it harder to see which
+    role a workflow actually uses.
+  EOT
+  value       = module.cicd.deploy_role_arn
+}

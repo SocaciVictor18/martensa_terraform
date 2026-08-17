@@ -404,6 +404,39 @@ module "gateway" {
 # Storefront
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# CI/CD identity
+# ---------------------------------------------------------------------------
+
+# Declared before there is a deploy workflow, deliberately. The workflow cannot be tested without
+# an applied environment; the trust policy can be reviewed, and the review is the part that
+# matters - a missing `sub` condition lets any repository on GitHub deploy here, and it fails
+# silently because the intended workflow keeps working.
+module "cicd" {
+  source = "../../modules/cicd"
+
+  name_prefix   = local.name_prefix
+  github_owner  = var.github_owner
+  repositories  = var.deploy_repositories
+  deploy_branch = var.deploy_branch
+
+  ecr_repository_arns = values(module.ecr.repository_arns)
+  ecs_cluster_arn     = module.ecs.cluster_id
+
+  # Both roles a task definition may name, and nothing else. The notification service has its own
+  # task role (see notification.tf), which is exactly the kind of addition that has to be repeated
+  # here - a service missing from this list fails its first deploy with an AccessDenied naming the
+  # role, which is the right way round.
+  passable_role_arns = [
+    module.ecs.execution_role_arn,
+    module.ecs.task_role_arn,
+    aws_iam_role.notification_task.arn,
+  ]
+
+  storefront_bucket_arn       = module.frontend.bucket_arn
+  storefront_distribution_arn = module.frontend.distribution_arn
+}
+
 module "frontend" {
   source = "../../modules/frontend"
 

@@ -23,3 +23,13 @@ output "hosted_zone_id" {
   description = "CloudFront's fixed hosted zone id, for a Route 53 alias record."
   value       = aws_cloudfront_distribution.site.hosted_zone_id
 }
+
+output "bucket_arn" {
+  description = "For the CI/CD role's upload policy, so it is scoped to this bucket rather than to S3."
+  value       = aws_s3_bucket.site.arn
+}
+
+output "distribution_arn" {
+  description = "For the CI/CD role's invalidation policy. CloudFront ARNs are global - no region."
+  value       = aws_cloudfront_distribution.site.arn
+}
