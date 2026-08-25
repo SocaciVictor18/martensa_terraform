@@ -393,6 +393,14 @@ module "gateway" {
     CART_BASE_URL        = module.cart.base_url
     ORDERS_BASE_URL      = module.orders.base_url
     PAYMENTS_BASE_URL    = module.payments.base_url
+    # The seventh downstream, and the only prefix routed to it is the back office's view of the
+    # mail queue - Notification serves no customer-facing HTTP at all.
+    #
+    # The gateway's DownstreamProperties refuses to start without this, deliberately: a guessed
+    # address answers 503 and reads like an outage in Notification rather than a task deployed
+    # without its configuration. That refusal is why this line matters - the gateway runs fine
+    # on a laptop without it and dies here at container start, naming the property.
+    NOTIFICATION_BASE_URL = module.notification.base_url
   }
 
   secrets = {
