@@ -64,8 +64,17 @@ bootstrap_admin_user_id = ""
 
 # --- Guard rails -------------------------------------------------------------
 
-# All three are the production defaults. Set them false only for an environment you intend to
-# tear down and rebuild.
+# All three are the production defaults, and they are correct for anything that ever holds real
+# data. Set them false ONLY for an environment you intend to tear down and rebuild.
+#
+# **For a first apply that you plan to destroy the same day, false is the designed use of these
+# variables, not a weakened guard rail.** Left true, `terraform destroy` fails partway through -
+# RDS refuses, then the ALB refuses - and what it leaves behind is not free: the load balancer and
+# ten VPC interface endpoints keep billing about $105 a month with nothing running on them, and
+# nothing tells you. The first invoice would, thirty days later.
+#
+# The modules keep the safe values as their own defaults, so this file is the only place the
+# decision is made and it is made once, in the open.
 db_deletion_protection  = true
 db_skip_final_snapshot  = false
 alb_deletion_protection = true

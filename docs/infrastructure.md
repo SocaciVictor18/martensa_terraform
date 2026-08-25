@@ -584,3 +584,40 @@ Named rather than left to be discovered.
   the build machine produced. CI has to target it explicitly (`docker buildx build --platform
   linux/arm64`), or the task fails at start with `image Manifest does not contain descriptor
   matching platform`. The alternative is `cpu_architecture = "X86_64"` and a ~20% premium.
+
+## The gateway reaches Notification, and destroying a trial environment
+
+Two changes, both of them the half of a cross-repo task that gets forgotten.
+
+### `NOTIFICATION_BASE_URL` on the gateway task
+
+The gateway now routes `/api/admin/notifications/**` — the back office's view of the mail queue,
+which was served and unreachable. That makes Notification its seventh downstream, and the
+gateway's `DownstreamProperties` **refuses to start** without an address for it. Deliberately: a
+guessed address answers 503 and reads like an outage in Notification rather than a task deployed
+without its configuration.
+
+That refusal is exactly why this line matters here. The gateway runs fine on a laptop, where
+`application-local.yml` supplies `http://localhost:9007`, and dies at container start in the
+cluster with an error naming the property. **A new environment variable is a task-definition
+change in this repository**, and nothing fails without it until the container starts.
+
+### Turning the guard rails off is the designed use, once
+
+`db_deletion_protection`, `db_skip_final_snapshot` and `alb_deletion_protection` already existed
+and already defaulted to the safe values in their modules. What was missing was the consequence
+written next to the decision.
+
+Left true, `terraform destroy` on a trial environment **fails partway through** — RDS refuses,
+then the ALB refuses — and what it leaves behind is not free. The load balancer plus ten VPC
+interface endpoints (five endpoints across two availability zones) keep billing roughly **$105 a
+month with nothing running on them**, and nothing says so. The first invoice would, thirty days
+later.
+
+So `terraform.tfvars.example` now states that false is correct for an environment you intend to
+tear down the same day, and that the modules keep the safe values as their own defaults — which
+is what makes this a decision taken once, in the open, rather than a guard rail weakened to get
+past an error.
+
+**Set an AWS Budget with an email alert at $50 before the first apply.** It costs nothing and it
+covers the case that actually happens: a half-finished destroy nobody notices.
