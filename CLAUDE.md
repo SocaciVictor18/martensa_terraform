@@ -24,7 +24,14 @@ consumed and none produced, no customer-facing HTTP at all), Gateway (Spring Clo
 reactive, owns no data at all), Frontend (`martensa-frontend` — React 19 + Vite + TypeScript +
 Tailwind, talks only to the gateway, owns no data either), and the **AWS infrastructure**
 (`martensa_terraform` — nine modules, written and validated, **never applied**).
-**Next:** roadmap step 11, CI/CD — the deploy stage, and a gate for the frontend.
+**Next:** roadmap step 11, CI/CD — **the deploy stage**. The frontend gate is done
+(`martensa-frontend/.github/workflows/ci.yml`, typecheck + Vitest + build, on push and PR), and so
+is the ARM64 image build the ECS task definitions have always asked for. What is left is build →
+ECR → update ECS, which cannot be verified without a real account.
+
+**Before AWS:** the plan and the cost ledger are the two things to read. `terraform destroy` needs
+`deletion_protection = false` in `dev.tfvars` or it fails halfway and leaves ~$105/month running
+with nothing on it, and an AWS Budget alert at $50 costs nothing.
 
 **Every topic on the platform now has a consumer.** The two that did not — `PromotionStarted` and
 `PaymentFailed` — are both read by the notification service. The second was deliberately
@@ -125,7 +132,9 @@ better solution exists — not to write the code for me unless I explicitly ask.
 `tflint --recursive` — see the third-stack note above.*
 
 - `mvn verify` runs Checkstyle + SpotBugs + unit tests + integration tests (Failsafe) + the
-  JaCoCo gate (70% instruction / 60% branch). **Zero violations before a task is done** — don't
+  JaCoCo gate (**85% instruction / 70% branch** — this file said 70/60 until somebody checked
+  `martensa-platform-parent/pom.xml`, and understating a gate is how a change gets written to the
+  wrong bar). **Zero violations before a task is done** — don't
   report a task complete without running it.
 - `mvn spring-boot:run -Dspring-boot.run.profiles=local` starts a service against its Docker
   Compose dependencies (auto-started by Spring Boot's Docker Compose support).
@@ -283,6 +292,12 @@ delivery-semantics contract, and it binds every service:
   blocks until the broker answers. A non-blocking `poll(ZERO)` leaves the consumer positioned
   past its own test data, 20 seconds from a misleading "No records found for topic".
 - If a change removes or weakens a test, say so explicitly rather than letting it pass silently.
+- **A test that restates its own configuration cannot check it.** The gateway's `RouteConfigTest`
+  asserts its route list equals a list written in the same repository, and stayed green while two
+  admin prefixes were unroutable — a list compared against itself always agrees. Cross-service
+  claims belong in `martensa-platform-parent/tools/e2e.py`, the only thing on the platform that
+  sees both sides. It discovers each service's `/api/admin/**` paths from that service's own
+  OpenAPI document rather than from a list, which is what makes it a check rather than an echo.
 
 ---
 
